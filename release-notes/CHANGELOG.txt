@@ -1,0 +1,21 @@
+DepthWard Camera 1.0.38 Beta
+Minecraft 1.20.1 | Forge 47.4.x | Client-side | Java 17
+
+Changes since 1.0.18:
+- Updated the third-person circular cutaway and its wall boundaries.
+- Full walls one or two blocks thick stop the camera just inside their far face, towards the side opposite the player.
+- Thick terrain allows the camera to pass into blocks while keeping a circular opening around the player.
+- Added collision handling based on the actual shapes of fences, stairs and slabs.
+- The camera can move below solid ground using the same thin-layer rules as walls.
+- Fixed floor cutaway when an embedded camera reaches the player's foot level.
+- Added front-wall and side-wall cutaway limits.
+- Retained close-range dither fading for the local player.
+- Restored the 1.0.18 circle size and proximity scaling: base radius 25.3% of screen height, up to 2.2x when the camera approaches the player.
+
+This release uses the circular cutaway. It does not include the experimental cylinder, whole-block selection, or smoothing changes from 1.0.39-1.0.41.
+
+Known limitations:
+Wall detection is approximate. Complex corners, mixed shapes and unusual camera angles may still cause clipping, black areas or visibility into hidden space. This is not a guaranteed anti-xray solution. Active shader packs are unsupported and disable the feature. Player fading uses dithering. Performance has not been benchmarked.
+
+Validation:
+Local build, Minecraft API linkage checks and GPU shader tests passed during development. The user confirmed the 1.0.38 camera/floor behavior in-game. This is not comprehensive compatibility testing.

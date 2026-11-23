@@ -7,7 +7,7 @@ import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
-/** One-block surface layer: allow entry, but stop before the camera exits its far face. */
+/** One/two full-block layers: stop inside their far face; partial shapes stop at their actual surface. */
 public final class ThinWallCollision {
     private static boolean limited;
     private static double requestedDistance=4;
@@ -33,22 +33,32 @@ public final class ThinWallCollision {
         for(int ray=-1;ray<8;ray++){
             Vec3 shift=ray<0?Vec3.ZERO:new Vec3((ray&1)==0?-0.1:0.1,(ray&2)==0?-0.1:0.1,(ray&4)==0?-0.1:0.1);
             Vec3 from=start.add(shift);
-            var hit=level.clip(new ClipContext(from,from.add(delta),ClipContext.Block.VISUAL,ClipContext.Fluid.NONE,entity));
-            if(hit.getType()!=HitResult.Type.BLOCK)continue;
-            var behind=hit.getBlockPos().relative(hit.getDirection().getOpposite());
-            var state=level.getBlockState(behind);
-            // Thickness is counted along the hit face normal, not oblique ray length.
-            // A second opaque block behind this face retains the existing thick-wall cutaway.
-            if(state.canOcclude()&&!state.getOcclusionShape(level,behind).isEmpty())continue;
-            thinEncountered=true;
-            Vec3 direction=delta.scale(1.0/distance);
-            var axis=hit.getDirection().getAxis();
-            double component=direction.get(axis),origin=from.get(axis);
-            int cell=hit.getBlockPos().get(axis);
-            double farFace=cell+(component>0?1.0:0.0);
-            // World-space normal clearance protects the far face even at an oblique angle.
-            double stop=WallBoundary.stop(origin,component,farFace);
-            allowed=Math.min(allowed,Math.max(0,stop));
+
+            var context=new ClipContext(from,from.add(delta),ClipContext.Block.COLLIDER,ClipContext.Fluid.NONE,entity);
+            double[] nearest={allowed};
+            boolean[] encountered={false};
+            // Visit all obstacles: a thick region must not hide a later thin wall.
+            BlockGetter.traverseBlocks(from,from.add(delta),context,(ctx,pos)->{
+                var shape=ctx.getBlockShape(level.getBlockState(pos),level,pos);
+                var hit=shape.clip(ctx.getFrom(),ctx.getTo(),pos);
+                if(hit==null)return null;
+                Vec3 direction=delta.scale(1.0/distance);
+                var axis=hit.getDirection().getAxis();
+                double component=direction.get(axis);
+                if(Math.abs(component)<1e-8)return null;
+                if(!WallLayers.full(level,pos)){
+                    encountered[0]=true;
+                    nearest[0]=Math.min(nearest[0],WallBoundary.floorStop(from.distanceTo(hit.getLocation()),component));
+                }else{
+                    double farFace=WallLayers.farFace(level,pos,hit.getDirection().getOpposite());
+                    if(Double.isFinite(farFace)){
+                        encountered[0]=true;
+                        nearest[0]=Math.min(nearest[0],WallBoundary.stop(from.get(axis),component,farFace));
+                    }
+                }
+                return null;
+            },ctx->null);
+            allowed=nearest[0];thinEncountered|=encountered[0];
         }
         limited=thinEncountered;
         return allowed;

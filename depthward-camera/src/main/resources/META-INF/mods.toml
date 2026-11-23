@@ -3,7 +3,7 @@ loaderVersion="[47,)"
 license="All Rights Reserved"
 [[mods]]
 modId="depthward_camera"
-version="1.0.18"
+version="1.0.38"
 displayName="DepthWard Camera"
 displayTest="IGNORE_ALL_VERSION"
 description='''Client-side third-person terrain cutaway and camera collision bypass.'''

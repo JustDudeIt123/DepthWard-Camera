@@ -16,16 +16,18 @@ import java.lang.reflect.Method;
 
 @Mod.EventBusSubscriber(modid = DepthwardCamera.ID, value = Dist.CLIENT)
 public final class Cutaway {
-    private static float x, y, radius, depth, cutDepth;
+    private static float radius,cylinderLength,circleX,circleY;
     private static float feetY, width, height;
     private static float visibility;
+    private static boolean cameraEmbedded;
+    private static Vec3 cylinderAxis=Vec3.ZERO;
 
     private static final Matrix4f inverse = new Matrix4f();
 
     private static final java.nio.FloatBuffer matrixBuffer = org.lwjgl.BufferUtils.createFloatBuffer(16);
     private static boolean frame;
     private static long lastFrame,holdUntil;
-    private static final Matrix4f sightProjection=new Matrix4f();
+
     private static boolean blockEntity;
     private static boolean restoreCull, previousCull;
     private static Method shaderPackActive;
@@ -66,7 +68,11 @@ public final class Cutaway {
             var mc = Minecraft.getInstance();
             var feet = mc.player.getPosition(e.getPartialTick());
             var camera = e.getCamera().getPosition();
-            boolean obstructed=insideSolid(camera)||occluded(feet,camera);
+            var look=e.getCamera().getLookVector();
+            cylinderAxis=new Vec3(look.x(),look.y(),look.z()).normalize();
+
+            cameraEmbedded=insideSolid(camera);
+            boolean obstructed=cameraEmbedded||occluded(feet,camera);
             if(obstructed)holdUntil=now+120_000_000L;
             visibility=CameraMath.transition(visibility,obstructed||now<holdUntil,seconds);
             if(visibility<=0)return;
@@ -82,36 +88,26 @@ public final class Cutaway {
             height = h;
             feetY = (float)(feet.y-camera.y);
             inverse.set(e.getProjectionMatrix()).mul(e.getPoseStack().last().pose()).invert();
-            sightProjection.set(inverse).invert();
 
-            x = (projected.x / projected.w * 0.5f + 0.5f) * w;
-            y = (projected.y / projected.w * 0.5f + 0.5f) * h;
-            // Reach the far side of the model so touching/intersecting blockers are removed too.
-            float rear = view.z;
-            double half = mc.player.getBbWidth()*0.5;
-            for (double dx : new double[]{-half,half}) for (double dy : new double[]{0,mc.player.getBbHeight()}) for (double dz : new double[]{-half,half}) {
-                var corner = feet.add(dx,dy,dz).subtract(camera);
-                var v = new Vector4f((float)corner.x,(float)corner.y,(float)corner.z,1);
-                e.getPoseStack().last().pose().transform(v);
-                rear = Math.min(rear,v.z);
-            }
-            view.z = rear - DepthwardCamera.MARGIN.get().floatValue();
-            if (view.z >= -0.05f) return;
-            e.getProjectionMatrix().transform(view);
-            depth = view.z / view.w * 0.5f + 0.5f;
-            cutDepth=depth;
+
+            cylinderLength=(float)CylinderMath.endAtModel(relative.x,relative.y,relative.z,
+                cylinderAxis.x,cylinderAxis.y,cylinderAxis.z,
+                mc.player.getBbWidth()*0.5,mc.player.getBbHeight()*0.5,DepthwardCamera.MARGIN.get());
+            if(cylinderLength<=0.05)return;
+            circleX=(projected.x/projected.w*.5f+.5f)*w;
+            circleY=(projected.y/projected.w*.5f+.5f)*h;
             double distance=camera.distanceTo(mc.player.getEyePosition(e.getPartialTick()));
             radius = h * DepthwardCamera.RADIUS.get().floatValue()
                 * (float)Math.min(2.2,Math.pow(Math.max(1,ThinWallCollision.requestedDistance()/Math.max(0.25,distance)),0.65));
-            frame = true;
-            VisibilityGrid.prepare(camera,mc.player.getEyePosition(e.getPartialTick()));
-
+            double worldRadius=Math.min(8,Math.max(.25,2*radius/h*(-view.z)/e.getProjectionMatrix().m11()));
+            ThinWallMask.prepare(camera,feet,cylinderLength,worldRadius);
+            frame=true;
             CullingCompat.pause();
             previousCull = org.lwjgl.opengl.GL11C.glIsEnabled(org.lwjgl.opengl.GL11C.GL_CULL_FACE);
             restoreCull = true;
 
 
-            VisibilityBackdrop.draw();
+
             CutSurfaces.draw(e,feet,camera);
         } else if (e.getStage() == RenderLevelStageEvent.Stage.AFTER_LEVEL) {
             frame=false;
@@ -127,7 +123,7 @@ public final class Cutaway {
     public static void upload(int program) {
         if (program == 0) return;
         PlayerFade.upload(program);
-        VisibilityGrid.bind(program);
+
         int circle = GL20C.glGetUniformLocation(program, "dwCutCircle");
         boolean active = frame && enabled();
         if (circle < 0) {
@@ -135,16 +131,32 @@ public final class Cutaway {
             active &= blockEntity;
         }
         if (circle < 0) return;
-        GL20C.glUniform4f(circle, x, y, active ? radius : 0, DepthwardCamera.FEATHER.get().floatValue());
-        GL20C.glUniform2f(GL20C.glGetUniformLocation(program, "dwCutDepth"), cutDepth, visibility);
+        GL20C.glUniform4f(circle,circleX,circleY,active?radius:0,DepthwardCamera.FEATHER.get().floatValue());
+        GL20C.glUniform2f(GL20C.glGetUniformLocation(program,"dwCutDepth"),cameraEmbedded?1:0,visibility);
         GL20C.glUniform3f(GL20C.glGetUniformLocation(program,"dwCutWorld"),width,height,feetY);
-        matrixBuffer.clear();
-        GL20C.glUniform4f(GL20C.glGetUniformLocation(program,"dwSightClip"),x,y,frame?radius:0,depth);
-        sightProjection.get(matrixBuffer);
-        GL20C.glUniformMatrix4fv(GL20C.glGetUniformLocation(program,"dwSightProjection"),false,matrixBuffer);
+        GL20C.glUniform4f(GL20C.glGetUniformLocation(program,"dwCylinder"),(float)cylinderAxis.x,(float)cylinderAxis.y,(float)cylinderAxis.z,radius);
+        GL20C.glUniform1f(GL20C.glGetUniformLocation(program,"dwCylinderLength"),active?cylinderLength:0);
+        ThinWallMask.upload(program,active);
         matrixBuffer.clear();
         inverse.get(matrixBuffer);
         GL20C.glUniformMatrix4fv(GL20C.glGetUniformLocation(program,"dwCutInverse"),false,matrixBuffer);
+    }
+    /** Horizontal camera-relative back: floor/ceiling and decorative plants do not enlarge the opening. */
+    private static double backWallGap(Vec3 feet){
+        var mc=Minecraft.getInstance();
+        Vec3 back=new Vec3(-cylinderAxis.x,0,-cylinderAxis.z);
+        if(back.lengthSqr()<1e-6)return Double.POSITIVE_INFINITY;
+        back=back.normalize();
+        double extent=mc.player.getBbWidth()*0.5/Math.max(Math.abs(back.x),Math.abs(back.z));
+        double gap=Double.POSITIVE_INFINITY;
+        for(double fraction:new double[]{0.25,0.55,0.85}){
+            Vec3 from=feet.add(0,mc.player.getBbHeight()*fraction,0);
+            var hit=mc.level.clip(new ClipContext(from,from.add(back.scale(extent+1.5)),
+                ClipContext.Block.COLLIDER,ClipContext.Fluid.NONE,mc.player));
+            if(hit.getType()==HitResult.Type.BLOCK&&hit.getDirection().getAxis()!=net.minecraft.core.Direction.Axis.Y)
+                gap=Math.min(gap,Math.max(0,from.distanceTo(hit.getLocation())-extent));
+        }
+        return gap;
     }
     private static boolean insideSolid(Vec3 camera){
         var mc=Minecraft.getInstance();

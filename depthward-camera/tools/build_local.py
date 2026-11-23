@@ -37,7 +37,7 @@ def main():
         if not dest.exists(): run(mapper+[official, srg, 'dev', src, dest, other])
     extra = [f for f in libraries.rglob('*.jar') if not any(x in ('client','forge','server') for x in f.relative_to(libraries).parts)]
     devcp = [cache/'forge-official.jar', cache/'minecraft-official.jar', universal]+extra
-    output = MODULE/'build/libs/depthward-camera-1.0.18.jar'
+    output = MODULE/'build/libs/depthward-camera-1.0.38.jar'
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='dw-camera-') as tmp:
         work = Path(tmp)

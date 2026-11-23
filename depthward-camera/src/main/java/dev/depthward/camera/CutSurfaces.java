@@ -18,7 +18,7 @@ final class CutSurfaces {
     };
     static void draw(RenderLevelStageEvent event,Vec3 feet,Vec3 camera) {
         var mc=Minecraft.getInstance();
-        if(mc.player==null || mc.player.isSpectator() || !CameraDiagnostics.interiors())return;
+        if(mc.player==null || mc.player.isSpectator())return;
         // Bound work even for an unusually distant custom camera. Only loaded client blocks are read.
         int minX=(int)Math.floor(Math.min(feet.x,camera.x)-3),maxX=(int)Math.floor(Math.max(feet.x,camera.x)+3);
         int minY=(int)Math.floor(Math.min(feet.y,camera.y)-3),maxY=(int)Math.floor(Math.max(feet.y+mc.player.getBbHeight(),camera.y)+3);
